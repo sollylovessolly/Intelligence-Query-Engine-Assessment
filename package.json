@@ -3,9 +3,9 @@
   "version": "1.0.0",
   "main": "dist/server.js",
   "scripts": {
-    "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
-    "build": "node ./node_modules/typescript/bin/tsc",
-    "start": "node dist/server.js",
+    "dev": "ts-node-dev --respawn src/server.ts",
+
+    "start": "npx ts-node src/server.ts",
     "seed": "ts-node-dev --transpile-only src/seed.ts"
   },
   "dependencies": {
@@ -13,6 +13,7 @@
     "dotenv": "^16.5.0",
     "express": "^4.21.2",
     "pg": "^8.14.1",
+    "ts-node": "^10.9.2",
     "typescript": "^6.0.3",
     "uuidv7": "^1.0.2"
   },

@@ -1,5 +1,5 @@
 {
   "deploy": {
-    "startCommand": "node dist/server.js"
+    "startCommand": "npx ts-node src/server.ts"
   }
 }
