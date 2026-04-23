@@ -14,7 +14,7 @@ type Profile = {
   country_probability: number;
 };
 
-async function seed() {
+export async function seed() {
   const filePath = path.join(process.cwd(), "data", "profiles.json");
 
   const file = fs.readFileSync(filePath, "utf-8");
@@ -74,7 +74,7 @@ async function seed() {
     console.error("Seeding failed ❌", err);
   } finally {
     client.release();
-    await pool.end();
+
   }
 }
 
