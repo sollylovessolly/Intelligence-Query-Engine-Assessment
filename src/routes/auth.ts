@@ -3,7 +3,6 @@ import crypto from "crypto";
 import { uuidv7 } from "uuidv7";
 import { pool } from "../db";
 import { env } from "../config/env";
-
 import {
   createAccessToken,
   createRefreshToken,
@@ -12,6 +11,8 @@ import {
 } from "../utils/tokens";
 
 const router = Router();
+
+/* ---------------- HELPERS ---------------- */
 
 function base64Url(input: Buffer) {
   return input
@@ -37,16 +38,10 @@ async function saveRefreshToken(userId: string, refreshToken: string) {
   );
 }
 
-router.get("/github", (req, res) => {
-  const mode = String(req.query.mode || "web");
+/* ---------------- OAUTH START ---------------- */
+
+router.get("/github", (_req, res) => {
   const redirectUri = `${env.backendUrl}/auth/github/callback`;
-
-  const statePayload = {
-    mode,
-    redirect: req.query.redirect || env.webAppUrl,
-  };
-
-  const state = Buffer.from(JSON.stringify(statePayload)).toString("base64url");
 
   const verifier = crypto.randomBytes(32).toString("base64url");
   const challenge = createCodeChallenge(verifier);
@@ -62,49 +57,50 @@ router.get("/github", (req, res) => {
   url.searchParams.set("client_id", env.githubClientId);
   url.searchParams.set("redirect_uri", redirectUri);
   url.searchParams.set("scope", "read:user user:email");
-  url.searchParams.set("state", state);
   url.searchParams.set("code_challenge", challenge);
   url.searchParams.set("code_challenge_method", "S256");
 
   res.redirect(url.toString());
 });
 
+/* ---------------- CALLBACK ---------------- */
+
 router.get("/github/callback", async (req, res) => {
   try {
     const code = String(req.query.code || "");
-    const state = String(req.query.state || "");
     const codeVerifier = req.cookies.github_code_verifier;
 
-    if (!code || !state || !codeVerifier) {
+    if (!code || !codeVerifier) {
       return res.status(400).json({
         status: "error",
-        message: "Missing OAuth callback parameters",
+        message: "Missing OAuth parameters",
       });
     }
 
-    const statePayload = JSON.parse(Buffer.from(state, "base64url").toString());
-
-    const tokenResponse = await fetch("https://github.com/login/oauth/access_token", {
-      method: "POST",
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        client_id: env.githubClientId,
-        client_secret: env.githubClientSecret,
-        code,
-        code_verifier: codeVerifier,
-        redirect_uri: `${env.backendUrl}/auth/github/callback`,
-      }),
-    });
+    const tokenResponse = await fetch(
+      "https://github.com/login/oauth/access_token",
+      {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          client_id: env.githubClientId,
+          client_secret: env.githubClientSecret,
+          code,
+          code_verifier: codeVerifier,
+          redirect_uri: `${env.backendUrl}/auth/github/callback`,
+        }),
+      }
+    );
 
     const tokenData: any = await tokenResponse.json();
 
     if (!tokenData.access_token) {
       return res.status(400).json({
         status: "error",
-        message: "GitHub authentication failed",
+        message: "GitHub auth failed",
       });
     }
 
@@ -115,18 +111,6 @@ router.get("/github/callback", async (req, res) => {
     });
 
     const githubUser: any = await githubUserResponse.json();
-
-    const emailResponse = await fetch("https://api.github.com/user/emails", {
-      headers: {
-        Authorization: `Bearer ${tokenData.access_token}`,
-      },
-    });
-
-    const emails: any[] = await emailResponse.json();
-    const primaryEmail =
-      Array.isArray(emails)
-        ? emails.find((e) => e.primary)?.email || emails[0]?.email || null
-        : null;
 
     const existing = await pool.query(
       `SELECT * FROM users WHERE github_id = $1`,
@@ -139,16 +123,15 @@ router.get("/github/callback", async (req, res) => {
       const created = await pool.query(
         `
         INSERT INTO users (
-          id, github_id, username, email, avatar_url, role, is_active, last_login_at
+          id, github_id, username, avatar_url, role, is_active, last_login_at
         )
-        VALUES ($1, $2, $3, $4, $5, 'analyst', true, NOW())
+        VALUES ($1, $2, $3, $4, 'analyst', true, NOW())
         RETURNING *
         `,
         [
           uuidv7(),
           String(githubUser.id),
           githubUser.login,
-          primaryEmail,
           githubUser.avatar_url,
         ]
       );
@@ -159,23 +142,15 @@ router.get("/github/callback", async (req, res) => {
         `
         UPDATE users
         SET username = $1,
-            email = $2,
-            avatar_url = $3,
+            avatar_url = $2,
             last_login_at = NOW()
-        WHERE github_id = $4
+        WHERE github_id = $3
         RETURNING *
         `,
-        [githubUser.login, primaryEmail, githubUser.avatar_url, String(githubUser.id)]
+        [githubUser.login, githubUser.avatar_url, String(githubUser.id)]
       );
 
       user = updated.rows[0];
-    }
-
-    if (!user.is_active) {
-      return res.status(403).json({
-        status: "error",
-        message: "User account is inactive",
-      });
     }
 
     const accessToken = createAccessToken(user);
@@ -185,33 +160,17 @@ router.get("/github/callback", async (req, res) => {
 
     res.clearCookie("github_code_verifier");
 
-    if (statePayload.mode === "cli") {
-      return res.json({
-        status: "success",
-        access_token: accessToken,
-        refresh_token: refreshToken,
-        user: {
-          username: user.username,
-          role: user.role,
-        },
-      });
-    }
+    /* 🔥 IMPORTANT CHANGE — RETURN JSON INSTEAD OF REDIRECT */
 
-    res.cookie("access_token", accessToken, {
-      httpOnly: true,
-      sameSite: "lax",
-      secure: process.env.NODE_ENV === "production",
-      maxAge: 3 * 60 * 1000,
+    return res.json({
+      status: "success",
+      access_token: accessToken,
+      refresh_token: refreshToken,
+      user: {
+        username: user.username,
+        role: user.role,
+      },
     });
-
-    res.cookie("refresh_token", refreshToken, {
-      httpOnly: true,
-      sameSite: "lax",
-      secure: process.env.NODE_ENV === "production",
-      maxAge: 5 * 60 * 1000,
-    });
-
-    return res.redirect(String(statePayload.redirect || env.webAppUrl));
   } catch (err) {
     console.error(err);
     return res.status(500).json({
@@ -221,9 +180,11 @@ router.get("/github/callback", async (req, res) => {
   }
 });
 
+/* ---------------- REFRESH ---------------- */
+
 router.post("/refresh", async (req, res) => {
   try {
-    const refreshToken = req.body.refresh_token || req.cookies.refresh_token;
+    const refreshToken = req.body.refresh_token;
 
     if (!refreshToken) {
       return res.status(400).json({
@@ -250,7 +211,7 @@ router.post("/refresh", async (req, res) => {
     if (!stored.rows[0]) {
       return res.status(401).json({
         status: "error",
-        message: "Invalid or expired refresh token",
+        message: "Invalid refresh token",
       });
     }
 
@@ -259,18 +220,12 @@ router.post("/refresh", async (req, res) => {
       [tokenHash]
     );
 
-    const userResult = await pool.query(`SELECT * FROM users WHERE id = $1`, [
-      payload.sub,
-    ]);
+    const userResult = await pool.query(
+      `SELECT * FROM users WHERE id = $1`,
+      [payload.sub]
+    );
 
     const user = userResult.rows[0];
-
-    if (!user || !user.is_active) {
-      return res.status(403).json({
-        status: "error",
-        message: "Forbidden",
-      });
-    }
 
     const newAccessToken = createAccessToken(user);
     const newRefreshToken = createRefreshToken(user);
@@ -285,13 +240,15 @@ router.post("/refresh", async (req, res) => {
   } catch {
     return res.status(401).json({
       status: "error",
-      message: "Invalid or expired refresh token",
+      message: "Invalid refresh token",
     });
   }
 });
 
+/* ---------------- LOGOUT ---------------- */
+
 router.post("/logout", async (req, res) => {
-  const refreshToken = req.body.refresh_token || req.cookies.refresh_token;
+  const refreshToken = req.body.refresh_token;
 
   if (refreshToken) {
     await pool.query(
@@ -300,12 +257,9 @@ router.post("/logout", async (req, res) => {
     );
   }
 
-  res.clearCookie("access_token");
-  res.clearCookie("refresh_token");
-
   return res.json({
     status: "success",
-    message: "Logged out successfully",
+    message: "Logged out",
   });
 });
 
