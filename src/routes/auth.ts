@@ -3,6 +3,7 @@ import crypto from "crypto";
 import { uuidv7 } from "uuidv7";
 import { pool } from "../db";
 import { env } from "../config/env";
+import authRouter from "./routes/auth";
 import {
   createAccessToken,
   createRefreshToken,

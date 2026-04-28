@@ -38,6 +38,10 @@ app.get("/", (_req, res) => {
   res.json({ status: "success", message: "API running 🚀" });
 });
 
+app.get("/test-auth", (_req, res) => {
+  res.send("auth route working");
+});
+
 app.use("/auth", authLimiter, authRouter);
 
 app.use("/api", apiLimiter);
