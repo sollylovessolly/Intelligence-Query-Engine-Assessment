@@ -84,7 +84,13 @@ router.get("/github/callback", async (req, res) => {
       });
     }
 
-    /* 🔁 Exchange code for GitHub token */
+    /* 🔁 FIXED: preserve redirect param */
+    const redirectUri = redirect
+      ? `${env.backendUrl}/auth/github/callback?redirect=${encodeURIComponent(
+          redirect
+        )}`
+      : `${env.backendUrl}/auth/github/callback`;
+
     const tokenResponse = await fetch(
       "https://github.com/login/oauth/access_token",
       {
@@ -98,7 +104,7 @@ router.get("/github/callback", async (req, res) => {
           client_secret: env.githubClientSecret,
           code,
           code_verifier: codeVerifier,
-          redirect_uri: `${env.backendUrl}/auth/github/callback`,
+          redirect_uri: redirectUri, // ✅ FIXED HERE
         }),
       }
     );
@@ -171,14 +177,14 @@ router.get("/github/callback", async (req, res) => {
 
     res.clearCookie("github_code_verifier");
 
-    /* 🔥 CLI REDIRECT FLOW */
+    /* 🔥 CLI REDIRECT */
     if (redirect) {
       return res.redirect(
         `${redirect}?access_token=${accessToken}&refresh_token=${refreshToken}&username=${user.username}&role=${user.role}`
       );
     }
 
-    /* 🌐 Default JSON response */
+    /* 🌐 WEB RESPONSE */
     return res.json({
       status: "success",
       access_token: accessToken,
