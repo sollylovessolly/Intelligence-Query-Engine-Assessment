@@ -14,15 +14,19 @@ declare global {
 export async function requireAuth(req: Request, res: Response, next: NextFunction) {
   try {
     const authHeader = req.headers.authorization;
+    const cookieToken = req.cookies?.access_token;
 
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    const token = authHeader?.startsWith("Bearer ")
+      ? authHeader.replace("Bearer ", "")
+      : cookieToken;
+
+    if (!token) {
       return res.status(401).json({
         status: "error",
         message: "Authentication required",
       });
     }
 
-    const token = authHeader.replace("Bearer ", "");
     const payload = verifyAccessToken(token);
 
     const result = await pool.query(
@@ -48,6 +52,19 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
         status: "error",
         message: "User account is inactive",
       });
+    }
+
+    const isMutatingRequest = !["GET", "HEAD", "OPTIONS"].includes(req.method);
+    const isCookieAuth = !authHeader?.startsWith("Bearer ") && Boolean(cookieToken);
+
+    if (isMutatingRequest && isCookieAuth) {
+      const csrfHeader = req.header("X-CSRF-Token");
+      if (!csrfHeader || csrfHeader !== req.cookies?.csrf_token) {
+        return res.status(403).json({
+          status: "error",
+          message: "Invalid CSRF token",
+        });
+      }
     }
 
     req.user = user;

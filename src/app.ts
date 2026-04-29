@@ -11,11 +11,17 @@ import { requireApiVersion } from "./middleware/apiVersion";
 
 const app = express();
 
-app.use(cors({ 
+app.set("trust proxy", 1);
+
+const corsOptions = {
   origin: true, 
   credentials: true,
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-API-Version']
-}));
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-API-Version", "X-CSRF-Token"],
+};
+
+app.use(cors(corsOptions));
+app.options("*", cors(corsOptions));
 app.use(express.json());
 app.use(cookieParser());
 app.use(requestLogger);
@@ -42,11 +48,19 @@ app.get("/", (_req, res) => {
 
 app.use("/auth", authLimiter, authRouter);
 
-app.get("/api/users/me", requireAuth, (req, res) => {
+app.use("/api", apiLimiter);
+
+app.get("/api/v1/users/me", requireAuth, (req, res) => {
   return res.json({ status: "success", data: req.user });
 });
 
-app.use("/api", apiLimiter);
+app.use("/api/v1", requireAuth);
+app.use("/api/v1/profiles", profilesRouter);
+
+app.get("/api/users/me", requireApiVersion, requireAuth, (req, res) => {
+  return res.json({ status: "success", data: req.user });
+});
+
 app.use("/api", requireApiVersion);
 app.use("/api", requireAuth);
 app.use("/api/profiles", profilesRouter);

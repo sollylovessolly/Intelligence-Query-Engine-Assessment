@@ -64,7 +64,7 @@ router.get("/", async (req, res) => {
     const pageNum = Number(page);
     const limitNum = Math.min(Number(limit), 50);
 
-    if (isNaN(pageNum) || isNaN(limitNum)) {
+    if (isNaN(pageNum) || isNaN(limitNum) || pageNum < 1 || limitNum < 1) {
       return res.status(422).json({ status: "error", message: "Invalid query parameters" });
     }
 
@@ -78,13 +78,18 @@ router.get("/", async (req, res) => {
       });
 
     const totalResult = await pool.query(countQuery, countValues);
-    const total = totalResult.rows[0].total;
+    const total = Number(totalResult.rows[0].total);
 
     const dataResult = await pool.query(dataQuery, dataValues);
 
     const totalPages = Math.ceil(total / limitNum);
 
     const baseUrl = req.baseUrl + req.path;
+    const links = {
+      self: `${baseUrl}?page=${pageNum}&limit=${limitNum}`,
+      next: pageNum < totalPages ? `${baseUrl}?page=${pageNum + 1}&limit=${limitNum}` : null,
+      prev: pageNum > 1 ? `${baseUrl}?page=${pageNum - 1}&limit=${limitNum}` : null,
+    };
 
     res.json({
       status: "success",
@@ -92,11 +97,17 @@ router.get("/", async (req, res) => {
       limit: limitNum,
       total,
       total_pages: totalPages,
-      links: {
-        self: `${baseUrl}?page=${pageNum}&limit=${limitNum}`,
-        next: pageNum < totalPages ? `${baseUrl}?page=${pageNum + 1}&limit=${limitNum}` : null,
-        prev: pageNum > 1 ? `${baseUrl}?page=${pageNum - 1}&limit=${limitNum}` : null,
+      pagination: {
+        page: pageNum,
+        limit: limitNum,
+        total,
+        total_pages: totalPages,
+        totalPages,
+        has_next_page: pageNum < totalPages,
+        has_prev_page: pageNum > 1,
+        links,
       },
+      links,
       data: dataResult.rows,
     });
   } catch (err) {
@@ -124,6 +135,10 @@ router.get("/search", async (req, res) => {
     const pageNum = Number(page);
     const limitNum = Math.min(Number(limit), 50);
 
+    if (isNaN(pageNum) || isNaN(limitNum) || pageNum < 1 || limitNum < 1) {
+      return res.status(422).json({ status: "error", message: "Invalid query parameters" });
+    }
+
     const { countQuery, countValues, dataQuery, dataValues } =
       buildProfilesQuery({
         filters,
@@ -132,11 +147,19 @@ router.get("/search", async (req, res) => {
       });
 
     const totalResult = await pool.query(countQuery, countValues);
-    const total = totalResult.rows[0].total;
+    const total = Number(totalResult.rows[0].total);
 
     const dataResult = await pool.query(dataQuery, dataValues);
 
     const totalPages = Math.ceil(total / limitNum);
+
+    const baseUrl = req.baseUrl + req.path;
+    const encodedQuery = encodeURIComponent(String(q));
+    const links = {
+      self: `${baseUrl}?q=${encodedQuery}&page=${pageNum}&limit=${limitNum}`,
+      next: pageNum < totalPages ? `${baseUrl}?q=${encodedQuery}&page=${pageNum + 1}&limit=${limitNum}` : null,
+      prev: pageNum > 1 ? `${baseUrl}?q=${encodedQuery}&page=${pageNum - 1}&limit=${limitNum}` : null,
+    };
 
     res.json({
       status: "success",
@@ -144,11 +167,17 @@ router.get("/search", async (req, res) => {
       limit: limitNum,
       total,
       total_pages: totalPages,
-      links: {
-        self: `/api/profiles/search?page=${pageNum}&limit=${limitNum}`,
-        next: pageNum < totalPages ? `/api/profiles/search?page=${pageNum + 1}&limit=${limitNum}` : null,
-        prev: pageNum > 1 ? `/api/profiles/search?page=${pageNum - 1}&limit=${limitNum}` : null,
+      pagination: {
+        page: pageNum,
+        limit: limitNum,
+        total,
+        total_pages: totalPages,
+        totalPages,
+        has_next_page: pageNum < totalPages,
+        has_prev_page: pageNum > 1,
+        links,
       },
+      links,
       data: dataResult.rows,
     });
   } catch (err) {
