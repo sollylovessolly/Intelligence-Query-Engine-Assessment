@@ -38,10 +38,16 @@ async function saveRefreshToken(userId: string, refreshToken: string) {
   );
 }
 
-/* ---------------- OAUTH START ---------------- */
+/* ---------------- START OAUTH ---------------- */
 
-router.get("/github", (_req, res) => {
-  const redirectUri = `${env.backendUrl}/auth/github/callback`;
+router.get("/github", (req, res) => {
+  const redirect = req.query.redirect as string;
+
+  const redirectUri = redirect
+    ? `${env.backendUrl}/auth/github/callback?redirect=${encodeURIComponent(
+        redirect
+      )}`
+    : `${env.backendUrl}/auth/github/callback`;
 
   const verifier = crypto.randomBytes(32).toString("base64url");
   const challenge = createCodeChallenge(verifier);
@@ -68,6 +74,7 @@ router.get("/github", (_req, res) => {
 router.get("/github/callback", async (req, res) => {
   try {
     const code = String(req.query.code || "");
+    const redirect = req.query.redirect as string;
     const codeVerifier = req.cookies.github_code_verifier;
 
     if (!code || !codeVerifier) {
@@ -77,6 +84,7 @@ router.get("/github/callback", async (req, res) => {
       });
     }
 
+    /* 🔁 Exchange code for GitHub token */
     const tokenResponse = await fetch(
       "https://github.com/login/oauth/access_token",
       {
@@ -104,14 +112,16 @@ router.get("/github/callback", async (req, res) => {
       });
     }
 
-    const githubUserResponse = await fetch("https://api.github.com/user", {
+    /* 👤 Fetch user */
+    const githubUserRes = await fetch("https://api.github.com/user", {
       headers: {
         Authorization: `Bearer ${tokenData.access_token}`,
       },
     });
 
-    const githubUser: any = await githubUserResponse.json();
+    const githubUser: any = await githubUserRes.json();
 
+    /* 🔍 Check user */
     const existing = await pool.query(
       `SELECT * FROM users WHERE github_id = $1`,
       [String(githubUser.id)]
@@ -153,6 +163,7 @@ router.get("/github/callback", async (req, res) => {
       user = updated.rows[0];
     }
 
+    /* 🔑 Tokens */
     const accessToken = createAccessToken(user);
     const refreshToken = createRefreshToken(user);
 
@@ -160,8 +171,14 @@ router.get("/github/callback", async (req, res) => {
 
     res.clearCookie("github_code_verifier");
 
-    /* 🔥 IMPORTANT CHANGE — RETURN JSON INSTEAD OF REDIRECT */
+    /* 🔥 CLI REDIRECT FLOW */
+    if (redirect) {
+      return res.redirect(
+        `${redirect}?access_token=${accessToken}&refresh_token=${refreshToken}&username=${user.username}&role=${user.role}`
+      );
+    }
 
+    /* 🌐 Default JSON response */
     return res.json({
       status: "success",
       access_token: accessToken,
@@ -220,22 +237,22 @@ router.post("/refresh", async (req, res) => {
       [tokenHash]
     );
 
-    const userResult = await pool.query(
+    const userRes = await pool.query(
       `SELECT * FROM users WHERE id = $1`,
       [payload.sub]
     );
 
-    const user = userResult.rows[0];
+    const user = userRes.rows[0];
 
-    const newAccessToken = createAccessToken(user);
-    const newRefreshToken = createRefreshToken(user);
+    const newAccess = createAccessToken(user);
+    const newRefresh = createRefreshToken(user);
 
-    await saveRefreshToken(user.id, newRefreshToken);
+    await saveRefreshToken(user.id, newRefresh);
 
     return res.json({
       status: "success",
-      access_token: newAccessToken,
-      refresh_token: newRefreshToken,
+      access_token: newAccess,
+      refresh_token: newRefresh,
     });
   } catch {
     return res.status(401).json({
