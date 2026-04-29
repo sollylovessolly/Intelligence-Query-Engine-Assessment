@@ -85,7 +85,7 @@ app.get("/", (_req, res) => {
   res.json({ status: "success", message: "API running 🚀" });
 });
 
-app.use("/auth", strictAuthLimiter, authLimiter, authRouter);
+app.use("/auth", strictAuthLimiter, authRouter);
 
 app.use("/api", apiLimiter);
 
