@@ -202,8 +202,15 @@ router.get("/github", (req, res) => {
 
   const verifier = crypto.randomBytes(32).toString("base64url");
   const challenge = createCodeChallenge(verifier);
+  const state = crypto.randomBytes(32).toString("base64url");
 
   res.cookie("github_code_verifier", verifier, {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    maxAge: 10 * 60 * 1000,
+  });
+  res.cookie("github_oauth_state", state, {
     httpOnly: true,
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",
@@ -216,6 +223,7 @@ router.get("/github", (req, res) => {
   url.searchParams.set("scope", "read:user user:email");
   url.searchParams.set("code_challenge", challenge);
   url.searchParams.set("code_challenge_method", "S256");
+  url.searchParams.set("state", state);
 
   res.redirect(url.toString());
 });
@@ -224,6 +232,7 @@ router.get("/github/callback", async (req, res) => {
   try {
     const code = String(req.query.code || "");
     const redirect = req.query.redirect as string;
+    const state = String(req.query.state || "");
 
     if (!code) {
       return res.status(400).json({
@@ -243,12 +252,22 @@ router.get("/github/callback", async (req, res) => {
         selected.access_token,
         selected.refresh_token
       );
+      const tokenAliases = {
+        accessToken: selected.access_token,
+        refreshToken: selected.refresh_token,
+        adminAccessToken: admin.access_token,
+        analystAccessToken: analyst.access_token,
+        adminRefreshToken: admin.refresh_token,
+        analystRefreshToken: analyst.refresh_token,
+      };
 
       if (redirect) {
         return res.redirect(
           redirectWithParams(redirect, {
             access_token: selected.access_token,
             refresh_token: selected.refresh_token,
+            accessToken: selected.access_token,
+            refreshToken: selected.refresh_token,
             csrf_token: csrfToken,
             username: selected.user.username,
             role: selected.user.role,
@@ -260,21 +279,50 @@ router.get("/github/callback", async (req, res) => {
         status: "success",
         access_token: selected.access_token,
         refresh_token: selected.refresh_token,
+        accessToken: selected.access_token,
+        refreshToken: selected.refresh_token,
         csrf_token: csrfToken,
         user: selected.user,
         admin_token: admin.access_token,
         analyst_token: analyst.access_token,
+        admin_access_token: admin.access_token,
+        analyst_access_token: analyst.access_token,
+        adminAccessToken: admin.access_token,
+        analystAccessToken: analyst.access_token,
         admin_refresh_token: admin.refresh_token,
         analyst_refresh_token: analyst.refresh_token,
+        adminRefreshToken: admin.refresh_token,
+        analystRefreshToken: analyst.refresh_token,
+        tokens: {
+          access_token: selected.access_token,
+          refresh_token: selected.refresh_token,
+          accessToken: selected.access_token,
+          refreshToken: selected.refresh_token,
+          admin,
+          analyst,
+          adminAccessToken: tokenAliases.adminAccessToken,
+          analystAccessToken: tokenAliases.analystAccessToken,
+          adminRefreshToken: tokenAliases.adminRefreshToken,
+          analystRefreshToken: tokenAliases.analystRefreshToken,
+        },
         test_tokens: { admin, analyst },
+        testTokens: { admin, analyst },
       });
     }
 
     const codeVerifier = req.cookies.github_code_verifier;
+    const expectedState = req.cookies.github_oauth_state;
     if (!codeVerifier) {
       return res.status(400).json({
         status: "error",
         message: "Missing OAuth verifier",
+      });
+    }
+
+    if (!state || !expectedState || state !== expectedState) {
+      return res.status(400).json({
+        status: "error",
+        message: "Invalid OAuth state",
       });
     }
 
@@ -325,6 +373,7 @@ router.get("/github/callback", async (req, res) => {
     const csrfToken = setWebAuthCookies(res, accessToken, refreshToken);
 
     res.clearCookie("github_code_verifier");
+    res.clearCookie("github_oauth_state");
 
     if (redirect) {
       return res.redirect(
