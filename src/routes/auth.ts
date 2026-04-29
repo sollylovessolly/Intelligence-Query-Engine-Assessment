@@ -402,7 +402,6 @@ router.get("/github/callback", async (req, res) => {
     return res.status(500).json({
       status: "error",
       message: "Server failure",
-      detail: err instanceof Error ? err.message : String(err),
     });
   }
 });

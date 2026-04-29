@@ -9,6 +9,7 @@ export function createAccessToken(user: AuthUser) {
       sub: user.id,
       username: user.username,
       role: user.role,
+      jti: crypto.randomBytes(16).toString("hex"),
     },
     env.jwtAccessSecret,
     { expiresIn: "3m" }
@@ -20,6 +21,7 @@ export function createRefreshToken(user: AuthUser) {
     {
       sub: user.id,
       type: "refresh",
+      jti: crypto.randomBytes(16).toString("hex"),
     },
     env.jwtRefreshSecret,
     { expiresIn: "5m" }
