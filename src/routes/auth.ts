@@ -286,4 +286,20 @@ router.post("/logout", async (req, res) => {
   });
 });
 
+router.get("/me", async (req, res) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return res.status(401).json({ status: "error", message: "Authentication required" });
+  }
+  try {
+    const token = authHeader.replace("Bearer ", "");
+    const { verifyAccessToken } = await import("../utils/tokens");
+    const payload = verifyAccessToken(token);
+    const result = await pool.query(`SELECT id, github_id, username, email, avatar_url, role, is_active, last_login_at, created_at FROM users WHERE id = $1`, [payload.sub]);
+    if (!result.rows[0]) return res.status(404).json({ status: "error", message: "User not found" });
+    return res.json({ status: "success", data: result.rows[0] });
+  } catch {
+    return res.status(401).json({ status: "error", message: "Invalid token" });
+  }
+});
 export default router;
